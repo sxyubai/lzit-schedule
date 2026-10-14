@@ -33,8 +33,19 @@ window.__lzitFetchResult = null;
     const hit = Object.keys(params).find(x => x.toLowerCase() === k || x.toLowerCase().endsWith(k));
     return hit ? params[hit] : '';
   };
-  const xnm = pick('xnm') || '', xqm = pick('xqm') || '';
+  // 学年学期 xnm/xqm：**正方接口就靠它** —— 传空的话服务器不知道查哪个学期，
+  // 接口会返回字面量 "null"（HTTP 200，4 字节）。这是"接口抓不到"的真正原因。
+  // 最可靠的来源是课表查询页上的两个下拉框（id 就叫 xnm / xqm，默认选中当前学期）；
+  // sessionStorage 里通常**没有**（实测只有一个 _path），只作兜底。
+  const elVal = (id) => {
+    const el = document.getElementById(id);
+    return el && el.value ? String(el.value) : '';
+  };
+  const xnmFromEl = elVal('xnm'), xqmFromEl = elVal('xqm');
+  const xnm = xnmFromEl || pick('xnm') || '';
+  const xqm = xqmFromEl || pick('xqm') || '';
   result.debug.xnm = xnm; result.debug.xqm = xqm;
+  result.debug.xnmSrc = xnmFromEl ? '页面下拉框' : (pick('xnm') ? 'sessionStorage' : '(取不到)');
 
   // 学号（su=）：正方接口要靠它，**取不到基本就返回空** ——
   // 这是"接口全失败、只好退回 DOM 解析"最常见的原因。
@@ -91,12 +102,16 @@ window.__lzitFetchResult = null;
   const tried = [];
   result.debug.tried = tried;
   for (const ep of endpoints) {
-    // 优先用空参：正方会返回**当前学期**，跨学期不用改代码
-    for (const body of [
-      'xnm=&xqm=&kzlx=ck',
-      `xnm=${encodeURIComponent(xnm)}&xqm=${encodeURIComponent(xqm)}&kzlx=ck`
-    ]) {
-      const tag = ep.split('/').pop() + ' [' + (body.indexOf('xnm=&') === 0 ? '空参' : '带学年学期') + ']';
+    // 优先用空参：正方会返回**当前学期**，跨学期不用改代码。
+    // 注意：学年学期取不到时，第二种参数拼出来和第一种**完全相同** ——
+    // 那样既白发一次请求，诊断里两行标签还会一模一样（曾因此误判）。
+    const bodies = ['xnm=&xqm=&kzlx=ck'];
+    if (xnm || xqm) {
+      bodies.push(`xnm=${encodeURIComponent(xnm)}&xqm=${encodeURIComponent(xqm)}&kzlx=ck`);
+    }
+    for (let bi = 0; bi < bodies.length; bi++) {
+      const body = bodies[bi];
+      const tag = ep.split('/').pop() + ' [' + (bi === 0 ? '空参' : '带学年学期') + ']';
       try {
         const r = await fetch(ep + '?gnmkdm=' + gnmkdm + '&su=' + encodeURIComponent(su), {
           method: 'POST',
