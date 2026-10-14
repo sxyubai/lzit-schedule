@@ -67,6 +67,9 @@ class _HomeShellState extends State<HomeShell> {
   Object? _error;
   int _week = 1;
   int _tab = 0;
+
+  /// 上次导入的诊断行（非 null 时在课表页顶部显示「接口没抓通」提示条）
+  List<String>? _importWarning;
   bool _followToday = true;
   SlotPrefs _slotPrefs = SlotPrefs.empty();
   final ReminderService _reminders = ReminderService();
@@ -489,7 +492,8 @@ class _HomeShellState extends State<HomeShell> {
         builder: (_) => ImportPage(
           existingId: _timetable?.id,
           existingName: _timetable?.name,
-          onImported: (tt) async {
+          onImported: (outcome) async {
+            final tt = outcome.timetable;
             await TimetableStore().save(tt);
             if (!mounted) return;
             setState(() {
@@ -503,6 +507,10 @@ class _HomeShellState extends State<HomeShell> {
                 list.add(tt);
               }
               _allTimetables = list;
+              // 导入完直接回课表页 —— 不用用户自己按返回
+              _tab = 0;
+              // 接口没抓通时，把诊断留在课表页顶部，别静默丢掉
+              _importWarning = outcome.isDegraded ? outcome.debugLines : null;
             });
             await _rememberCurrentTimetable(tt.id);
             // 跳到新课表自己的当前周
@@ -510,11 +518,78 @@ class _HomeShellState extends State<HomeShell> {
             _syncPageToWeek(tt);
             unawaited(_restoreReminders(tt));
             if (!mounted) return;
+            Navigator.of(context).pop(); // 关掉导入页
+            if (!mounted) return;
+            final short = '已导入「${tt.name}」共 ${tt.courses.length} 门课程';
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('已导入「${tt.name}」共 ${tt.courses.length} 门课程')),
+              SnackBar(
+                content: Text(outcome.isDegraded
+                    ? '$short —— 接口没抓通，实践课等信息可能缺失'
+                    : (outcome.unscheduledCount > 0
+                        ? '$short，含 ${outcome.unscheduledCount} 门无固定时段课程'
+                        : short)),
+                duration: const Duration(seconds: 3),
+              ),
             );
           },
         ),
+      ),
+    );
+  }
+
+  /// 课表页顶部的「接口没抓通」提示条
+  ///
+  /// 导入时会静默回退到 DOM 解析，那样实践课/实习（无固定时段课程）
+  /// 是拿不到的 —— 这条横幅让用户当场看到，而不是以为"面板坏了"。
+  Widget _importWarningBar() {
+    final lines = _importWarning;
+    if (lines == null) return const SizedBox.shrink();
+    return Material(
+      color: const Color(0xFFE07B39),
+      child: InkWell(
+        onTap: _showImportDiagnostics,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          child: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, size: 18, color: Colors.white),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  '导入时接口没抓通（用的是页面表格解析），'
+                  '实践课/实习这类「无固定时段课程」拿不到。点这里看诊断 →',
+                  style: TextStyle(color: Colors.white, fontSize: 11.5, height: 1.3),
+                ),
+              ),
+              IconButton(
+                tooltip: '知道了',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close, size: 16, color: Colors.white),
+                onPressed: () => setState(() => _importWarning = null),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 显示上一次导入的诊断（可长按复制）
+  void _showImportDiagnostics() {
+    final lines = _importWarning ?? const <String>[];
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('上次导入的诊断'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            lines.isEmpty ? '（没有诊断信息）' : lines.join('\n'),
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+        ],
       ),
     );
   }
@@ -624,6 +699,7 @@ class _HomeShellState extends State<HomeShell> {
             child: _tab == 0
                 ? Column(
                     children: [
+                      _importWarningBar(),
                       _weekBar(tt),
                       Expanded(
                         // 左右滑动切换周（像翻页一样跟手，不用去点箭头）

@@ -71,6 +71,18 @@ window.__lzitFetchResult = null;
   result.debug.su = su ? (su.length + '位') : '(空)';
 
   // ---------- A. 接口抓取 ----------
+  // 功能码 gnmkdm：优先用**当前 URL 上带的** —— 用户正停在课表查询页时，
+  // 那个页面用的就是正确功能码；取不到才退回实测的 N253508。
+  // （如果用户停在"按周次查询"页，硬编码的功能码可能对不上）
+  let gnmkdm = 'N253508';
+  const gm = location.href.match(/[?&]gnmkdm=([A-Za-z0-9]+)/);
+  if (gm) gnmkdm = gm[1];
+  result.debug.gnmkdm = gnmkdm;
+  // 登录态：cookie 为空的话接口必然失败（诊断时一眼可见）
+  result.debug.cookie = document.cookie
+    ? ('有 ' + document.cookie.split(';').length + ' 项')
+    : '(空)';
+
   const endpoints = [
     '/jwglxt/kbcx/xskbcx_cxXsKb.html',
     '/jwglxt/kbcx/xskbcx_cxXskbList.html'
@@ -86,7 +98,7 @@ window.__lzitFetchResult = null;
     ]) {
       const tag = ep.split('/').pop() + ' [' + (body.indexOf('xnm=&') === 0 ? '空参' : '带学年学期') + ']';
       try {
-        const r = await fetch(ep + '?gnmkdm=N253508&su=' + encodeURIComponent(su), {
+        const r = await fetch(ep + '?gnmkdm=' + gnmkdm + '&su=' + encodeURIComponent(su), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',

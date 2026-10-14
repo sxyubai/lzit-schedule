@@ -120,6 +120,18 @@ window.__lzitFetchResult = null;
   result.debug.su = su ? (su.length + '位') : '(空)';
 
   // ---------- A. 接口抓取 ----------
+  // 功能码 gnmkdm：优先用**当前 URL 上带的** —— 用户正停在课表查询页时，
+  // 那个页面用的就是正确功能码；取不到才退回实测的 N253508。
+  // （如果用户停在"按周次查询"页，硬编码的功能码可能对不上）
+  let gnmkdm = 'N253508';
+  const gm = location.href.match(/[?&]gnmkdm=([A-Za-z0-9]+)/);
+  if (gm) gnmkdm = gm[1];
+  result.debug.gnmkdm = gnmkdm;
+  // 登录态：cookie 为空的话接口必然失败（诊断时一眼可见）
+  result.debug.cookie = document.cookie
+    ? ('有 ' + document.cookie.split(';').length + ' 项')
+    : '(空)';
+
   const endpoints = [
     '/jwglxt/kbcx/xskbcx_cxXsKb.html',
     '/jwglxt/kbcx/xskbcx_cxXskbList.html'
@@ -135,7 +147,7 @@ window.__lzitFetchResult = null;
     ]) {
       const tag = ep.split('/').pop() + ' [' + (body.indexOf('xnm=&') === 0 ? '空参' : '带学年学期') + ']';
       try {
-        const r = await fetch(ep + '?gnmkdm=N253508&su=' + encodeURIComponent(su), {
+        const r = await fetch(ep + '?gnmkdm=' + gnmkdm + '&su=' + encodeURIComponent(su), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
@@ -227,8 +239,38 @@ window.__lzitFetchResult = null;
 'started';
 ''';
 
+/// 导入结果 + 这次抓取的诊断
+///
+/// 为什么要带出来：接口没抓通时会**静默回退**到页面表格(DOM)解析，
+/// 而 `sjkList`（实践课/实习）只有接口里有 —— 用户只会看到
+/// "无固定时段课程面板又不见了"。把这个结果带回课表页，
+/// 才能当场把原因摆出来，而不是让人去猜。
+class ImportOutcome {
+  final Timetable timetable;
+
+  /// `api` = 走的课表接口（数据完整）；
+  /// `dom` = 接口全失败、回退到页面表格解析（拿不到实践课）
+  final String mode;
+
+  /// 诊断行（脚本回传的 debug 整理而成）
+  final List<String> debugLines;
+
+  /// 本次抓到的无固定时段课程条数
+  final int unscheduledCount;
+
+  const ImportOutcome({
+    required this.timetable,
+    this.mode = 'api',
+    this.debugLines = const [],
+    this.unscheduledCount = 0,
+  });
+
+  /// 是否退化了（丢了实践课等只有接口才有的信息）
+  bool get isDegraded => mode != 'api';
+}
+
 class ImportPage extends StatefulWidget {
-  final void Function(Timetable) onImported;
+  final void Function(ImportOutcome) onImported;
 
   /// 当前已存在的课表 id（null = 还没有课表）。
   /// 用来在导入时问用户「覆盖它」还是「另外新增一份」。
@@ -261,6 +303,9 @@ class _ImportPageState extends State<ImportPage> {
   /// 抓取脚本回传的诊断信息（有它才能判断"为什么接口没通、退回了 DOM"）
   Map<String, dynamic>? _lastDebug;
 
+  /// 本次抓取走的路：`api`（接口）/ `dom`（页面表格回退）
+  String _lastMode = 'none';
+
   /// 把诊断信息整理成人能读的几行
   List<String> get _debugLines {
     final d = _lastDebug;
@@ -268,6 +313,8 @@ class _ImportPageState extends State<ImportPage> {
     final out = <String>[];
     if (d['host'] != null) out.add('页面域名：${d['host']}');
     if (d['su'] != null) out.add('学号 su：${d['su']}');
+    if (d['gnmkdm'] != null) out.add('功能码 gnmkdm：${d['gnmkdm']}');
+    if (d['cookie'] != null) out.add('登录态 cookie：${d['cookie']}');
     if (d['xnm'] != null || d['xqm'] != null) {
       out.add('学年学期：xnm=${d['xnm'] ?? ''} xqm=${d['xqm'] ?? ''}');
     }
@@ -376,7 +423,9 @@ class _ImportPageState extends State<ImportPage> {
 
       dynamic decoded;
       const stepMs = 300;
-      const maxWaitMs = 15000;
+      // 30 秒：脚本会依次试 2 个接口 × 2 组参数，校园网慢的时候
+      // 4 次请求加起来可能十几秒 —— 15 秒的旧上限会把"慢"误判成"失败"
+      const maxWaitMs = 30000;
       var waited = 0;
       while (waited < maxWaitMs) {
         await Future<void>.delayed(const Duration(milliseconds: stepMs));
@@ -394,7 +443,7 @@ class _ImportPageState extends State<ImportPage> {
       }
 
       if (decoded == null) {
-        setState(() => _status = '抓取超时：脚本 15 秒内没有返回结果。\n'
+        setState(() => _status = '抓取超时：脚本 30 秒内没有返回结果。\n'
             '请确认页面已经打开「信息查询 → 个人课表查询」，并且课表内容已显示出来。');
         return;
       }
@@ -414,6 +463,7 @@ class _ImportPageState extends State<ImportPage> {
 
       final data = decoded['data'];
       _lastDebug = (decoded['debug'] as Map?)?.cast<String, dynamic>();
+      _lastMode = mode;
       List<Course> courses = [];
       ZfTimetableResponse? parsed;
       if (mode == 'api') {
@@ -715,13 +765,18 @@ class _ImportPageState extends State<ImportPage> {
     final name = nameCtl.text.trim().isEmpty
         ? defaultTimetableName(startDate)
         : nameCtl.text.trim();
-    widget.onImported(_buildTimetable(
-      courses,
-      parsed,
-      name: name,
-      startDate: startDate,
-      // 覆盖 → 沿用旧 id（替换它）；新增 → 给一个唯一 id（否则会撞车）
-      id: replace ? widget.existingId : 'jwglxt-${DateTime.now().millisecondsSinceEpoch}',
+    widget.onImported(ImportOutcome(
+      timetable: _buildTimetable(
+        courses,
+        parsed,
+        name: name,
+        startDate: startDate,
+        // 覆盖 → 沿用旧 id（替换它）；新增 → 给一个唯一 id（否则会撞车）
+        id: replace ? widget.existingId : 'jwglxt-${DateTime.now().millisecondsSinceEpoch}',
+      ),
+      mode: _lastMode,
+      debugLines: _debugLines,
+      unscheduledCount: parsed?.unscheduled.length ?? 0,
     ));
   }
 
