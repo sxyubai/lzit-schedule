@@ -15,7 +15,7 @@ const String kGroupNumber = '1126356335';
 const String kGithubUrl = 'https://github.com/sxyubai/lzit-schedule';
 
 /// 应用版本（与 pubspec 的 version 保持一致，改版本时一起改）
-const String kAppVersion = '1.0.4';
+const String kAppVersion = '1.0.1';
 
 /// 项目简介
 const String kIntro =
