@@ -85,22 +85,55 @@ window.__lzitFetchResult = null;
   const xnm = pick('xnm') || '', xqm = pick('xqm') || '';
   result.debug.xnm = xnm; result.debug.xqm = xqm;
 
-  // 学号：从页面里的用户信息猜（正方通常放在顶部）
+  // 学号（su=）：正方接口要靠它，**取不到基本就返回空** ——
+  // 这是"接口全失败、只好退回 DOM 解析"最常见的原因。
+  // 多路兜底：
+  //   ① 页面顶部的用户信息元素   ② 整页文本里的「学号：123456」
+  //   ③ sessionStorage / localStorage   ④ 当前 URL 的 su 参数
   let su = '';
+  const suFromText = (t) => {
+    const m = (t || '').match(/学号[：:\s]*(\d{6,})/);
+    return m ? m[1] : '';
+  };
   const suEl = document.querySelector('.media-heading, .user-name, #yh_id, .navbar-text');
   if (suEl) { const m = (suEl.innerText || '').match(/\d{6,}/); if (m) su = m[0]; }
+  if (!su) su = suFromText(document.body ? document.body.innerText : '');
+  if (!su) {
+    try {
+      for (let i = 0; i < sessionStorage.length && !su; i++) {
+        su = suFromText(sessionStorage.getItem(sessionStorage.key(i)));
+      }
+    } catch (e) {}
+  }
+  if (!su) {
+    try {
+      for (let i = 0; i < localStorage.length && !su; i++) {
+        su = suFromText(localStorage.getItem(localStorage.key(i)));
+      }
+    } catch (e) {}
+  }
+  if (!su) {
+    const m = location.href.match(/[?&]su=(\d{6,})/);
+    if (m) su = m[1];
+  }
+  // 只记长度，不记学号本身（诊断信息可能会被截图外发）
+  result.debug.su = su ? (su.length + '位') : '(空)';
 
   // ---------- A. 接口抓取 ----------
   const endpoints = [
     '/jwglxt/kbcx/xskbcx_cxXsKb.html',
     '/jwglxt/kbcx/xskbcx_cxXskbList.html'
   ];
+  // 每次尝试都记一行，失败时能一眼看出卡在哪（HTTP 码 / 返回长度 / 异常）
+  const tried = [];
+  result.debug.tried = tried;
   for (const ep of endpoints) {
     // 优先用空参：正方会返回**当前学期**，跨学期不用改代码
     for (const body of [
       'xnm=&xqm=&kzlx=ck',
       `xnm=${encodeURIComponent(xnm)}&xqm=${encodeURIComponent(xqm)}&kzlx=ck`
     ]) {
+      const tag = ep.split('/').pop() + ' [' + (body.indexOf('xnm=&') === 0 ? '空参' : '带学年学期') + ']';
       try {
         const r = await fetch(ep + '?gnmkdm=N253508&su=' + encodeURIComponent(su), {
           method: 'POST',
@@ -112,7 +145,7 @@ window.__lzitFetchResult = null;
           body
         });
         const t = await r.text();
-        if (!t) continue;
+        if (!t) { tried.push(tag + ': HTTP ' + r.status + ' 空响应'); continue; }
         let j = null;
         try { j = JSON.parse(t); } catch (e) { /* 非 JSON */ }
 
@@ -123,6 +156,8 @@ window.__lzitFetchResult = null;
           result.debug.endpoint = ep; result.debug.body = body;
           result.debug.kbCount = j.kbList.length;
           result.debug.sjkCount = Array.isArray(j.sjkList) ? j.sjkList.length : 0;
+          tried.push(tag + ': OK kbList=' + j.kbList.length +
+                     ' sjkList=' + result.debug.sjkCount);
           window.__lzitFetchResult = result;
           return;
         }
@@ -130,13 +165,26 @@ window.__lzitFetchResult = null;
         if (j && Array.isArray(j) && j.length) {
           result.ok = true; result.mode = 'api'; result.data = { kbList: j };
           result.debug.endpoint = ep; result.debug.body = body;
+          result.debug.kbCount = j.length;
+          result.debug.sjkCount = 0;
+          tried.push(tag + ': OK 裸数组 ' + j.length + ' 条');
           window.__lzitFetchResult = result;
           return;
         }
-        if (t.length > 50 && !result.debug.lastText) {
-          result.debug.lastText = t.slice(0, 400);
+        // 有响应但不是课表：把结构记下来（这是定位问题的关键）
+        let shape = 'HTTP ' + r.status + ' ' + t.length + 'B';
+        if (j && typeof j === 'object') {
+          shape += ' keys=' + Object.keys(j).slice(0, 6).join(',');
+          if (Array.isArray(j.kbList)) shape += ' kbList=' + j.kbList.length + '条';
+        } else {
+          shape += ' 非JSON,前40字:' + t.slice(0, 40).replace(/\s+/g, ' ');
         }
-      } catch (e) { result.debug['err_' + ep] = String(e).slice(0, 120); }
+        tried.push(tag + ': ' + shape);
+        if (!result.debug.lastText) result.debug.lastText = t.slice(0, 400);
+      } catch (e) {
+        tried.push(tag + ': 异常 ' + String(e).slice(0, 80));
+        result.debug['err_' + ep] = String(e).slice(0, 120);
+      }
     }
   }
 
@@ -209,6 +257,33 @@ class _ImportPageState extends State<ImportPage> {
   bool _onSso = false;
   bool _autoJumped = false; // 门户 → 教务系统 只自动跳一次，避免循环
   String _status = '正在打开一网通办门户…';
+
+  /// 抓取脚本回传的诊断信息（有它才能判断"为什么接口没通、退回了 DOM"）
+  Map<String, dynamic>? _lastDebug;
+
+  /// 把诊断信息整理成人能读的几行
+  List<String> get _debugLines {
+    final d = _lastDebug;
+    if (d == null) return const [];
+    final out = <String>[];
+    if (d['host'] != null) out.add('页面域名：${d['host']}');
+    if (d['su'] != null) out.add('学号 su：${d['su']}');
+    if (d['xnm'] != null || d['xqm'] != null) {
+      out.add('学年学期：xnm=${d['xnm'] ?? ''} xqm=${d['xqm'] ?? ''}');
+    }
+    final tried = d['tried'];
+    if (tried is List) {
+      for (final t in tried) {
+        out.add('· $t');
+      }
+    }
+    if (d['endpoint'] != null) out.add('命中接口：${d['endpoint']}');
+    if (d['kbCount'] != null) out.add('kbList：${d['kbCount']} 条');
+    if (d['sjkCount'] != null) out.add('sjkList（实践课）：${d['sjkCount']} 条');
+    if (d['htmlLen'] != null) out.add('DOM 表格文本长度：${d['htmlLen']}');
+    if (d['error'] != null) out.add('错误：${d['error']}');
+    return out;
+  }
 
   @override
   void initState() {
@@ -332,11 +407,13 @@ class _ImportPageState extends State<ImportPage> {
         final errText = (rawErr is String && rawErr.trim().isNotEmpty)
             ? rawErr
             : '未知原因（脚本没有给出错误说明）';
-        setState(() => _status = '抓取失败：$errText\n\n调试信息：${decoded['debug']}');
+        _lastDebug = (decoded['debug'] as Map?)?.cast<String, dynamic>();
+        setState(() => _status = '抓取失败：$errText\n\n点这里看抓取诊断 →');
         return;
       }
 
       final data = decoded['data'];
+      _lastDebug = (decoded['debug'] as Map?)?.cast<String, dynamic>();
       List<Course> courses = [];
       ZfTimetableResponse? parsed;
       if (mode == 'api') {
@@ -385,6 +462,28 @@ class _ImportPageState extends State<ImportPage> {
     }
   }
 
+  /// 弹出抓取诊断（可长按复制，方便把问题反馈出来）
+  void _showDiagnostics() {
+    final lines = _debugLines;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('抓取诊断'),
+        content: SingleChildScrollView(
+          child: SelectableText(
+            lines.isEmpty
+                ? '还没有诊断信息 —— 先点一次「导入课表」。'
+                : lines.join('\n'),
+            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+        ],
+      ),
+    );
+  }
+
   void _showPreview(List<Course> courses, String mode, ZfTimetableResponse? parsed) {
     final totalSlots = courses.fold<int>(0, (a, c) => a + c.slots.length);
     showModalBottomSheet(
@@ -414,6 +513,50 @@ class _ImportPageState extends State<ImportPage> {
                     const SizedBox(height: 4),
                     Text('另有 ${parsed.unscheduled.length} 门无固定时段的实践/其它课程',
                         style: TextStyle(fontSize: 11, color: Colors.orange[700])),
+                  ],
+                  // 接口没通才会退回 DOM 解析，而 DOM 拿不到 sjkList ——
+                  // 用户会看到"实践课面板又不见了"，必须当场说清楚。
+                  if (mode == 'dom') ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('接口没抓通，这次是用「页面表格」解析的',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange[900])),
+                          const SizedBox(height: 3),
+                          Text('这样只能拿到课表网格：实践课/实习（无固定时段课程）'
+                              '和课程性质、教学班这些信息都会缺。',
+                              style: TextStyle(fontSize: 11, color: Colors.orange[900])),
+                          const SizedBox(height: 5),
+                          Row(
+                            children: [
+                              OutlinedButton(
+                                onPressed: _showDiagnostics,
+                                style: OutlinedButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                ),
+                                child: const Text('看诊断信息', style: TextStyle(fontSize: 11.5)),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text('可长按复制后发给我',
+                                    style: TextStyle(fontSize: 10.5, color: Colors.grey[700])),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -645,17 +788,31 @@ class _ImportPageState extends State<ImportPage> {
           WebViewWidget(controller: _controller),
           if (_loading)
             const LinearProgressIndicator(minHeight: 2),
-          // 顶部状态条
+          // 顶部状态条（点一下看抓取诊断）
           Positioned(
             left: 0,
             right: 0,
             top: 0,
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.65),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Text(_status,
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                  maxLines: 3),
+            child: GestureDetector(
+              onTap: _lastDebug == null ? null : _showDiagnostics,
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.65),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(_status,
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                          maxLines: 3),
+                    ),
+                    if (_lastDebug != null) ...[
+                      const SizedBox(width: 8),
+                      const Icon(Icons.bug_report_outlined,
+                          size: 16, color: Colors.white70),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
           // 悬浮按钮：三种状态**互斥**，只显示一个。

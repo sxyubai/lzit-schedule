@@ -36,22 +36,55 @@ window.__lzitFetchResult = null;
   const xnm = pick('xnm') || '', xqm = pick('xqm') || '';
   result.debug.xnm = xnm; result.debug.xqm = xqm;
 
-  // 学号：从页面里的用户信息猜（正方通常放在顶部）
+  // 学号（su=）：正方接口要靠它，**取不到基本就返回空** ——
+  // 这是"接口全失败、只好退回 DOM 解析"最常见的原因。
+  // 多路兜底：
+  //   ① 页面顶部的用户信息元素   ② 整页文本里的「学号：123456」
+  //   ③ sessionStorage / localStorage   ④ 当前 URL 的 su 参数
   let su = '';
+  const suFromText = (t) => {
+    const m = (t || '').match(/学号[：:\s]*(\d{6,})/);
+    return m ? m[1] : '';
+  };
   const suEl = document.querySelector('.media-heading, .user-name, #yh_id, .navbar-text');
   if (suEl) { const m = (suEl.innerText || '').match(/\d{6,}/); if (m) su = m[0]; }
+  if (!su) su = suFromText(document.body ? document.body.innerText : '');
+  if (!su) {
+    try {
+      for (let i = 0; i < sessionStorage.length && !su; i++) {
+        su = suFromText(sessionStorage.getItem(sessionStorage.key(i)));
+      }
+    } catch (e) {}
+  }
+  if (!su) {
+    try {
+      for (let i = 0; i < localStorage.length && !su; i++) {
+        su = suFromText(localStorage.getItem(localStorage.key(i)));
+      }
+    } catch (e) {}
+  }
+  if (!su) {
+    const m = location.href.match(/[?&]su=(\d{6,})/);
+    if (m) su = m[1];
+  }
+  // 只记长度，不记学号本身（诊断信息可能会被截图外发）
+  result.debug.su = su ? (su.length + '位') : '(空)';
 
   // ---------- A. 接口抓取 ----------
   const endpoints = [
     '/jwglxt/kbcx/xskbcx_cxXsKb.html',
     '/jwglxt/kbcx/xskbcx_cxXskbList.html'
   ];
+  // 每次尝试都记一行，失败时能一眼看出卡在哪（HTTP 码 / 返回长度 / 异常）
+  const tried = [];
+  result.debug.tried = tried;
   for (const ep of endpoints) {
     // 优先用空参：正方会返回**当前学期**，跨学期不用改代码
     for (const body of [
       'xnm=&xqm=&kzlx=ck',
       `xnm=${encodeURIComponent(xnm)}&xqm=${encodeURIComponent(xqm)}&kzlx=ck`
     ]) {
+      const tag = ep.split('/').pop() + ' [' + (body.indexOf('xnm=&') === 0 ? '空参' : '带学年学期') + ']';
       try {
         const r = await fetch(ep + '?gnmkdm=N253508&su=' + encodeURIComponent(su), {
           method: 'POST',
@@ -63,7 +96,7 @@ window.__lzitFetchResult = null;
           body
         });
         const t = await r.text();
-        if (!t) continue;
+        if (!t) { tried.push(tag + ': HTTP ' + r.status + ' 空响应'); continue; }
         let j = null;
         try { j = JSON.parse(t); } catch (e) { /* 非 JSON */ }
 
@@ -74,6 +107,8 @@ window.__lzitFetchResult = null;
           result.debug.endpoint = ep; result.debug.body = body;
           result.debug.kbCount = j.kbList.length;
           result.debug.sjkCount = Array.isArray(j.sjkList) ? j.sjkList.length : 0;
+          tried.push(tag + ': OK kbList=' + j.kbList.length +
+                     ' sjkList=' + result.debug.sjkCount);
           window.__lzitFetchResult = result;
           return;
         }
@@ -81,13 +116,26 @@ window.__lzitFetchResult = null;
         if (j && Array.isArray(j) && j.length) {
           result.ok = true; result.mode = 'api'; result.data = { kbList: j };
           result.debug.endpoint = ep; result.debug.body = body;
+          result.debug.kbCount = j.length;
+          result.debug.sjkCount = 0;
+          tried.push(tag + ': OK 裸数组 ' + j.length + ' 条');
           window.__lzitFetchResult = result;
           return;
         }
-        if (t.length > 50 && !result.debug.lastText) {
-          result.debug.lastText = t.slice(0, 400);
+        // 有响应但不是课表：把结构记下来（这是定位问题的关键）
+        let shape = 'HTTP ' + r.status + ' ' + t.length + 'B';
+        if (j && typeof j === 'object') {
+          shape += ' keys=' + Object.keys(j).slice(0, 6).join(',');
+          if (Array.isArray(j.kbList)) shape += ' kbList=' + j.kbList.length + '条';
+        } else {
+          shape += ' 非JSON,前40字:' + t.slice(0, 40).replace(/\s+/g, ' ');
         }
-      } catch (e) { result.debug['err_' + ep] = String(e).slice(0, 120); }
+        tried.push(tag + ': ' + shape);
+        if (!result.debug.lastText) result.debug.lastText = t.slice(0, 400);
+      } catch (e) {
+        tried.push(tag + ': 异常 ' + String(e).slice(0, 80));
+        result.debug['err_' + ep] = String(e).slice(0, 120);
+      }
     }
   }
 
