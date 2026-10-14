@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models/appearance.dart';
@@ -15,7 +14,6 @@ import 'pages/course_list_page.dart';
 import 'pages/import_page.dart';
 import 'pages/reminder_settings.dart';
 import 'pages/timetable_manager_page.dart';
-import 'services/ics_export.dart';
 import 'services/reminder_service.dart';
 import 'services/slot_cluster.dart';
 import 'services/slot_prefs.dart';
@@ -521,65 +519,6 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
-  /// 导出 ICS 到外部存储，用户可用日历 App 打开导入
-  ///
-  /// 上课提醒交给系统日历，不用自己写通知/保活。
-  /// 注意：这里不使用 share_plus —— 它与 Flutter 3.44 的 Built-in Kotlin 冲突。
-  Future<void> _exportIcs() async {
-    final tt = _timetable;
-    if (tt == null) return;
-    try {
-      final ics = IcsExport.generate(tt, alarmMinutesBefore: 20);
-      // Android: getExternalStorageDirectory -> /storage/emulated/0/Android/data/<pkg>/files
-      // 先试外部目录（用户能用文件管理器找到），失败退回应用文档目录
-      Directory? dir;
-      try {
-        dir = await getExternalStorageDirectory();
-      } catch (_) {
-        dir = null;
-      }
-      dir ??= await getApplicationDocumentsDirectory();
-      final safeName = tt.name.replaceAll(RegExp(r'[^\w\u4e00-\u9fa5-]'), '_');
-      final file = File('${dir.path}/$safeName.ics');
-      await file.writeAsString(ics, flush: true);
-
-      final events = 'BEGIN:VEVENT'.allMatches(ics).length;
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('课表已导出'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('共 $events 个上课事件（含提前 20 分钟提醒）'),
-              const SizedBox(height: 12),
-              const Text('文件位置：', style: TextStyle(fontSize: 12, color: Colors.grey)),
-              SelectableText(file.path, style: const TextStyle(fontSize: 12)),
-              const SizedBox(height: 12),
-              const Text(
-                '用手机「文件管理」找到它，选择用「日历」打开即可导入。',
-                style: TextStyle(fontSize: 12),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('知道了'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导出失败：$e')),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
@@ -722,7 +661,6 @@ class _HomeShellState extends State<HomeShell> {
                 : CourseListPage(
                     timetable: tt,
                     onOpenReminder: _openReminderSettings,
-                    onExportIcs: _exportIcs,
                     onImport: _openImport,
                     onEditSemesterStart: _editSemesterStart,
                     onOpenAppearance: _openAppearance,

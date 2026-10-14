@@ -11,7 +11,6 @@ class CourseListPage extends StatelessWidget {
 
   /// 设置入口（从周视图的 AppBar 挪过来：AppBar 上 4 个图标太挤且难找）
   final VoidCallback? onOpenReminder;
-  final VoidCallback? onExportIcs;
   final VoidCallback? onImport;
 
   /// 设置「本学期第 1 周周一」的日期
@@ -33,7 +32,6 @@ class CourseListPage extends StatelessWidget {
     super.key,
     required this.timetable,
     this.onOpenReminder,
-    this.onExportIcs,
     this.onImport,
     this.onEditSemesterStart,
     this.onOpenAppearance,
