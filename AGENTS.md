@@ -28,6 +28,22 @@ flutter build apk --release
   "different roots"。
 - 构建约 1.5~2 分钟；模拟器（`-no-window` 模式）比有窗口模式稳定得多。
 
+## 版本号规则
+
+**只有加了新功能才递增版本号；纯 bug 修复保持在同一个版本号上。**
+
+> 2026-10-14 踩过：为三个 bug 连着发了 1.0.2 / 1.0.3 / 1.0.4，
+> 结果 GitHub 上同时挂着「带 bug 的 v1.0.1」和「修好的 v1.0.4」，
+> 最后只能把两个 Release 和 tag 全删掉、重发一个干净的 v1.0.1。
+> 用户明确要求过这一点。
+
+- 改版本号要**同时改两处**：`pubspec.yaml` 的 `version:` 和
+  `lib/pages/about_page.dart` 的 `kAppVersion`（测试不覆盖，容易漏）。
+- `versionCode`（`version:` 里 `+` 后面那个数）**可以继续递增** —— 它是 Android
+  判断"能否覆盖安装"的依据，跟对外版本号无关。**往回调会导致新包盖不上旧包。**
+- 发布按 `tools/../_probe/create_release.ps1` 那套走：打 tag → push →
+  调 GitHub API 建 Release 并挂 APK（认证复用 Git Credential Manager，见全局约定）。
+
 ## 踩过的坑（改代码前先看这里）
 
 ### 1. WebView 抓取：不能用 `runJavaScriptReturningResult` 取 async 函数的返回值
