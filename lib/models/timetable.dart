@@ -345,6 +345,31 @@ class Timetable {
         events: events ?? this.events,
       );
 
+  /// 删掉某门课的**某一个时段**（周X 第N-M节）
+  ///
+  /// 返回新的 Timetable（本类是只读的，不改自己）。
+  /// 如果这是该课最后一个时段，整门课会一起消失 ——
+  /// 否则会留下一个没有任何时段的空课程，在界面上看不见却又删不掉。
+  ///
+  /// 定位用 `identical` 而不是 `==`：同一门课的 slots 里可能存在两条
+  /// 内容完全一样的记录（接口重复返回），按值删会一次删掉两条。
+  Timetable removeSlotOf(Course course, CourseSlot slot) {
+    final i = course.slots.indexWhere((s) => identical(s, slot));
+    if (i < 0) return this;
+    final kept = List<CourseSlot>.from(course.slots)..removeAt(i);
+    if (kept.isEmpty) return removeCourse(course);
+    return copyWith(
+      courses: courses
+          .map((c) => identical(c, course) ? c.copyWith(slots: kept) : c)
+          .toList(),
+    );
+  }
+
+  /// 删掉整门课（一周里的所有时段）
+  Timetable removeCourse(Course course) => copyWith(
+        courses: courses.where((c) => !identical(c, course)).toList(),
+      );
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,

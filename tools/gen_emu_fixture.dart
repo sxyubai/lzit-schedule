@@ -43,7 +43,19 @@ void main() {
     sectionsPerDay: preset.sectionsPerDay,
     sectionTimes: preset.times,
     courses: [
-      c('c1', '高等数学', 1, 1, 2, all, '1教408', '陈稳中'),
+      // 一周上两次 —— 用来验证「删除这个时段 / 删除整门课」的两级选择
+      Course(
+        id: 'c1',
+        name: '高等数学',
+        slots: [
+          CourseSlot(
+              weekday: 1, startSection: 1, endSection: 2, weeks: all,
+              room: '1教408', teacher: '陈稳中'),
+          CourseSlot(
+              weekday: 3, startSection: 9, endSection: 10, weeks: all,
+              room: '1教408', teacher: '陈稳中'),
+        ],
+      ),
       c('c2', '计算机网络', 2, 3, 4, {for (var w = 1; w <= 10; w++) w}, '2教201', '李老师'),
       c('c3', '操作系统', 3, 5, 6, {for (var w = 7; w <= 12; w++) w}, '2教305', '王老师'),
       // 只在 1~6 周上，第 8 周应该看不到（用来验证周次过滤）

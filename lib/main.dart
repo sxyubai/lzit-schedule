@@ -852,39 +852,113 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _showCourseDetail(Course course, CourseSlot slot) {
-    showModalBottomSheet(
+    unawaited(_openCourseDetail(course, slot));
+  }
+
+  /// 课程详情面板：能看，也能删
+  ///
+  /// 删除分两级 —— 一门课一周可能上好几次（多个时段），直接"删掉整门"
+  /// 很容易误伤，所以有多个时段时让用户自己选；只剩一个时段就没必要选。
+  Future<void> _openCourseDetail(Course course, CourseSlot slot) async {
+    final total = course.slots.length;
+    const wd = ['', '一', '二', '三', '四', '五', '六', '日'];
+    final slotLabel =
+        '周${wd[slot.weekday]} ${slot.startSection}-${slot.endSection}节';
+
+    final action = await showModalBottomSheet<String>(
       context: context,
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(width: 12, height: 12,
-                    decoration: BoxDecoration(
-                        color: colorForCourse(course.name, override: course.color),
-                        borderRadius: BorderRadius.circular(3))),
-                const SizedBox(width: 8),
-                Expanded(child: Text(course.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _kv('时间', '周${['', '一', '二', '三', '四', '五', '六', '日'][slot.weekday]} '
-                '${slot.startSection}-${slot.endSection}节'),
-            if (slot.weeks.isNotEmpty)
-              _kv('周次', _weeksText(slot.weeks)),
-            if (slot.room.isNotEmpty) _kv('教室', '${slot.campus} ${slot.room}'),
-            if (slot.teacher.isNotEmpty) _kv('教师', slot.teacher),
-            if (course.classNo.isNotEmpty) _kv('教学班', course.classNo),
-            if (course.credits > 0) _kv('学分', course.credits.toString()),
-            if (course.assessType.isNotEmpty) _kv('考核', course.assessType),
-            if (course.hourComposition.isNotEmpty) _kv('学时', course.hourComposition),
-            if (course.kindMark.isNotEmpty) _kv('类型', course.kindMark),
-          ],
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(width: 12, height: 12,
+                      decoration: BoxDecoration(
+                          color: colorForCourse(course.name, override: course.color),
+                          borderRadius: BorderRadius.circular(3))),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(course.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _kv('时间', slotLabel),
+              if (slot.weeks.isNotEmpty)
+                _kv('周次', _weeksText(slot.weeks)),
+              if (slot.room.isNotEmpty) _kv('教室', '${slot.campus} ${slot.room}'),
+              if (slot.teacher.isNotEmpty) _kv('教师', slot.teacher),
+              if (course.classNo.isNotEmpty) _kv('教学班', course.classNo),
+              if (course.credits > 0) _kv('学分', course.credits.toString()),
+              if (course.assessType.isNotEmpty) _kv('考核', course.assessType),
+              if (course.hourComposition.isNotEmpty) _kv('学时', course.hourComposition),
+              if (course.kindMark.isNotEmpty) _kv('类型', course.kindMark),
+              const Divider(height: 24),
+              if (total > 1)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.remove_circle_outline, color: Colors.red),
+                  title: const Text('删除这个时段', style: TextStyle(color: Colors.red)),
+                  subtitle: Text('只删 $slotLabel，其余 ${total - 1} 个时段保留',
+                      style: const TextStyle(fontSize: 11.5)),
+                  onTap: () => Navigator.pop(ctx, 'slot'),
+                ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: Text(total > 1 ? '删除整门课' : '删除这门课',
+                    style: const TextStyle(color: Colors.red)),
+                subtitle: total > 1
+                    ? Text('一周共 $total 个时段，全部删掉',
+                        style: const TextStyle(fontSize: 11.5))
+                    : null,
+                onTap: () => Navigator.pop(ctx, 'course'),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+
+    if (action == null || !mounted) return;
+    final tt = _timetable;
+    if (tt == null) return;
+
+    final onlySlot = action == 'slot';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(onlySlot
+            ? '删除这个时段？'
+            : (total > 1 ? '删除整门课？' : '删除这门课？')),
+        content: Text(onlySlot
+            ? '将从「${course.name}」里移除 $slotLabel。'
+            : '将从课表里移除「${course.name}」'
+                '${total > 1 ? '的全部 $total 个时段' : ''}，此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final updated =
+        onlySlot ? tt.removeSlotOf(course, slot) : tt.removeCourse(course);
+
+    await _saveTimetable(updated);
+    if (!mounted) return;
+    unawaited(_restoreReminders(updated));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(onlySlot ? '已删除 $slotLabel' : '已删除「${course.name}」')),
     );
   }
 
