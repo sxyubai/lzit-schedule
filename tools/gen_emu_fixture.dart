@@ -64,7 +64,9 @@ void main() {
     ],
   );
 
-  final out = File('tools/emu_timetable.json');
+  // 输出到 tools/samples/（已被 .gitignore 覆盖）——不要在 tools/ 根目录留产物
+  final out = File('tools/samples/emu_timetable.json');
+  out.parent.createSync(recursive: true);
   out.writeAsStringSync(
     const JsonEncoder.withIndent('  ').convert(tt.toJson()),
   );

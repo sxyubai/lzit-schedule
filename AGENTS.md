@@ -94,11 +94,39 @@ CDP 操作页面时，标签页不在前台 → `innerText` 全为空字符串�
 顺序反过来会把卡片的点击全吃掉。
 测试用 `Key('empty_<星期>_<节次>')` 定位格子，**不要去算像素坐标**（列宽受表头宽度影响）。
 
+### 在模拟器上验证界面（不用真机登录教务系统）
+
+`adb root` 之后可以直接往 app 的数据目录塞一份课表，跳过"必须导入才能看界面"的限制：
+
+```powershell
+dart run tools/gen_emu_fixture.dart      # 生成假课表到 tools/samples/emu_timetable.json
+adb push tools/samples/emu_timetable.json /data/data/cn.lzhit.lzit_schedule/app_flutter/timetables/emu1.json
+adb shell chown 10215:10215 /data/data/cn.lzhit.lzit_schedule/app_flutter/timetables/emu1.json
+adb shell chmod 600         /data/data/cn.lzhit.lzit_schedule/app_flutter/timetables/emu1.json
+adb shell am force-stop cn.lzhit.lzit_schedule
+adb shell am start -n cn.lzhit.lzit_schedule/.MainActivity
+```
+
+- 课表目录 = `<getApplicationDocumentsDirectory()>/timetables/<id>.json`，
+  安卓上是 `/data/data/<包名>/app_flutter/timetables/`。
+- **push 进去必须 `chown` 成 app 的 uid**（用
+  `adb shell stat -c '%u' /data/data/cn.lzhit.lzit_schedule` 查），否则 app 读不到。
+- **不要手写 JSON** —— 用 `tools/gen_emu_fixture.dart` 走项目自己的 `toJson()`，
+  字段名和格式一定对。
+- 点屏幕 `adb shell input tap <x> <y>`；⚠️ `input text` **不支持中文**，验证文字用英文。
+- 截图用 `adb shell screencap -p /sdcard/s.png` + `adb pull`；**不要**用
+  `adb exec-out screencap -p > file.png`，PowerShell 会按 UTF-16 写坏 PNG。
+
 ## 隐私（重要）
 
 - **不打包任何个人数据**。`assets/` 里只有字体；`pubspec.yaml` 刻意不声明 `assets/data/`。
   APK 可被解包，明文 JSON 会泄露学号姓名。
-- 测试样本放 `tools/samples/`（含真实学号/姓名，**已加入 .gitignore**，不进 APK）。
+- **真实教务数据一律放 `tools/samples/`**（已被 `.gitignore` 覆盖）。
+  ⚠️ **2026-10-14 踩过**：4 个真实样本（含学号与姓名）和 7 张含真实课表的模拟器截图
+  散落在 `tools/` **根目录**，被 `git add -A` 一起带进了提交 —— 仓库还是 Public，
+  最后只能 `git filter-branch` 重写历史才清掉。
+  **新增文件后先 `git status` 看路径**，别把样本或截图直接丢在 `tools/` 根下。
+- 调试截图统一叫 `shot_*.png`（`/tools/*.png` 与 `/tools/shot_*.png` 都已忽略）。
 - 首次启动走"空课表 → 引导导入"，不预置任何课表。
 
 ## 应用图标

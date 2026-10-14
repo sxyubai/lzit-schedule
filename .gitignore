@@ -48,6 +48,8 @@ app.*.map.json
 # tools/samples/ 里是从教务系统抓下来的**真实数据**（含学号/姓名/班级），
 # 绝不能提交到任何公开仓库。
 /tools/samples/
+# 模拟器验证用的假课表（由 tools/gen_emu_fixture.dart 生成）
+/tools/emu_timetable.json
 # 构建产物
 /dist/
 
