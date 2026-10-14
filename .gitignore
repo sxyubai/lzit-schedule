@@ -1,0 +1,60 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# ===== 本项目的隐私与产物排除 =====
+# tools/samples/ 里是从教务系统抓下来的**真实数据**（含学号/姓名/班级），
+# 绝不能提交到任何公开仓库。
+/tools/samples/
+# 构建产物
+/dist/
+
+# 开发助手的工作约定（含教务系统接口情报，不对外公开）
+/AGENTS.md
+
+# ===== 调试产物（模拟器截图 / 无障碍树 dump）=====
+# 这些是开发时随手截的图与 uiautomator dump，不该进公开仓库
+/tools/shot_*.png
+/tools/*.xml
