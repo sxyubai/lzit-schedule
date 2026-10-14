@@ -4,14 +4,17 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models/appearance.dart';
 import 'models/timetable.dart';
 import 'pages/about_page.dart';
+import 'pages/add_entry_sheet.dart';
 import 'pages/appearance_page.dart';
 import 'pages/course_list_page.dart';
 import 'pages/import_page.dart';
 import 'pages/reminder_settings.dart';
+import 'pages/timetable_manager_page.dart';
 import 'services/ics_export.dart';
 import 'services/reminder_service.dart';
 import 'services/slot_cluster.dart';
@@ -74,6 +77,12 @@ class _HomeShellState extends State<HomeShell> {
   final PageController _pageController = PageController();
   bool _pageReady = false; // 首帧建好后才能 jumpToPage
   bool _loadingDone = false; // 本地课表读取完成（用于区分"加载中"与"确实没有课表"）
+
+  /// 全部课表（支持多套：大一 / 大二 / 当前学期…）
+  List<Timetable> _allTimetables = const [];
+
+  /// 记住"当前使用哪一份"的键
+  static const String _prefsCurrentTt = 'current_timetable_id';
   Appearance _appearance = const Appearance(); // 外观（背景图/透明度等）
   final AppearanceStore _appearanceStore = AppearanceStore();
 
@@ -134,8 +143,15 @@ class _HomeShellState extends State<HomeShell> {
       final store = TimetableStore();
       final saved = await store.loadAll();
       if (saved.isNotEmpty) {
-        final tt = saved.first;
+        // 优先恢复上次选中的那份，找不到就用第一份
+        String? wantId;
+        try {
+          final sp = await SharedPreferences.getInstance();
+          wantId = sp.getString(_prefsCurrentTt);
+        } catch (_) {}
+        final tt = saved.firstWhere((t) => t.id == wantId, orElse: () => saved.first);
         setState(() {
+          _allTimetables = saved;
           _timetable = tt;
           _week = tt.currentWeek().clamp(1, tt.totalWeeks);
         });
@@ -167,6 +183,106 @@ class _HomeShellState extends State<HomeShell> {
         _pageController.jumpToPage(target);
       }
     });
+  }
+
+  /// 保存一份被改动过的课表，并同步内存里的课表列表
+  ///
+  /// 手工添加课程/事件、改名、删事件都走这里，避免每处各写一遍同步逻辑。
+  Future<void> _saveTimetable(Timetable updated) async {
+    await TimetableStore().save(updated);
+    if (!mounted) return;
+    setState(() {
+      final list = List<Timetable>.from(_allTimetables);
+      final i = list.indexWhere((t) => t.id == updated.id);
+      if (i >= 0) {
+        list[i] = updated;
+      } else {
+        list.add(updated);
+      }
+      _allTimetables = list;
+      if (_timetable?.id == updated.id) _timetable = updated;
+    });
+  }
+
+  /// 点课表空白格 → 手动添加一节课或一个事件
+  Future<void> _addEntryAt(int weekday, int section) async {
+    final tt = _timetable;
+    if (tt == null) return;
+
+    final r = await showAddEntrySheet(
+      context,
+      weekday: weekday,
+      section: section,
+      week: _week,
+      timetable: tt,
+    );
+    if (r == null || !mounted) return;
+
+    final Timetable updated;
+    final String tip;
+    if (r.course != null) {
+      updated = tt.copyWith(courses: [...tt.courses, r.course!]);
+      tip = '已添加课程「${r.course!.name}」';
+    } else if (r.event != null) {
+      updated = tt.copyWith(events: [...tt.events, r.event!]);
+      final e = r.event!;
+      tip = '已添加事件「${e.title}」'
+          '（${e.date.year}/${e.date.month}/${e.date.day}）';
+    } else {
+      return;
+    }
+
+    await _saveTimetable(updated);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tip)));
+  }
+
+  /// 点事件卡片 → 查看 / 删除
+  Future<void> _openEvent(TimetableEvent ev) async {
+    final tt = _timetable;
+    if (tt == null) return;
+
+    final wd = const ['一', '二', '三', '四', '五', '六', '日'][ev.day.weekday - 1];
+    final where = ev.location.isEmpty ? '' : ' · ${ev.location}';
+    final when = '${ev.date.year}/${ev.date.month}/${ev.date.day}（周$wd）'
+        '${ev.startSection == ev.endSection ? '第 ${ev.startSection} 节' : '第 ${ev.startSection}-${ev.endSection} 节'}';
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(ev.title,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text('$when$where',
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('删除这个事件', style: TextStyle(color: Colors.red)),
+              onTap: () => Navigator.pop(ctx, 'delete'),
+            ),
+            const SizedBox(height: 4),
+          ],
+        ),
+      ),
+    );
+    if (action != 'delete' || !mounted) return;
+
+    final updated =
+        tt.copyWith(events: tt.events.where((e) => e.id != ev.id).toList());
+    await _saveTimetable(updated);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('已删除事件「${ev.title}」')));
   }
 
   /// 设置「本学期第 1 周周一」
@@ -255,6 +371,87 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
+  /// 记住当前使用哪一份课表
+  Future<void> _rememberCurrentTimetable(String id) async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(_prefsCurrentTt, id);
+    } catch (e) {
+      debugPrint('记住当前课表失败: $e');
+    }
+  }
+
+  /// 切换当前使用的课表
+  Future<void> _switchTimetable(String id) async {
+    final idx = _allTimetables.indexWhere((t) => t.id == id);
+    if (idx < 0) return;
+    final tt = _allTimetables[idx];
+    setState(() {
+      _timetable = tt;
+      _week = tt.currentWeek().clamp(1, tt.totalWeeks);
+      _followToday = true;
+    });
+    await _rememberCurrentTimetable(id);
+    _pageReady = false;
+    _syncPageToWeek(tt);
+    unawaited(_restoreReminders(tt));
+  }
+
+  /// 重命名一份课表
+  Future<void> _renameTimetable(Timetable tt, String newName) async {
+    final updated = tt.copyWith(name: newName);
+    await TimetableStore().save(updated);
+    if (!mounted) return;
+    setState(() {
+      final list = List<Timetable>.from(_allTimetables);
+      final i = list.indexWhere((t) => t.id == tt.id);
+      if (i >= 0) list[i] = updated;
+      _allTimetables = list;
+      if (_timetable?.id == tt.id) _timetable = updated;
+    });
+  }
+
+  /// 删除一份课表；若删的是当前那份，自动切到剩下的第一份
+  Future<void> _deleteTimetable(Timetable tt) async {
+    await TimetableStore().delete(tt.id);
+    if (!mounted) return;
+    setState(() {
+      _allTimetables = _allTimetables.where((t) => t.id != tt.id).toList();
+      if (_timetable?.id == tt.id) {
+        if (_allTimetables.isEmpty) {
+          _timetable = null;
+        } else {
+          final next = _allTimetables.first;
+          _timetable = next;
+          _week = next.currentWeek().clamp(1, next.totalWeeks);
+        }
+      }
+    });
+    final cur = _timetable;
+    if (cur != null) {
+      await _rememberCurrentTimetable(cur.id);
+      _pageReady = false;
+      _syncPageToWeek(cur);
+      unawaited(_restoreReminders(cur));
+    }
+  }
+
+  /// 打开课表管理页
+  Future<void> _openTimetableManager() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TimetableManagerPage(
+          timetables: _allTimetables,
+          currentId: _timetable?.id,
+          onSwitch: _switchTimetable,
+          onRename: _renameTimetable,
+          onDelete: _deleteTimetable,
+          onImportNew: _openImport,
+        ),
+      ),
+    );
+  }
+
   /// 打开「关于」页
   void _openAbout() {
     Navigator.of(context).push(
@@ -292,17 +489,31 @@ class _HomeShellState extends State<HomeShell> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => ImportPage(
+          existingId: _timetable?.id,
+          existingName: _timetable?.name,
           onImported: (tt) async {
             await TimetableStore().save(tt);
             if (!mounted) return;
             setState(() {
               _timetable = tt;
+              // 覆盖时替换同 id 的那份，新增时追加
+              final list = List<Timetable>.from(_allTimetables);
+              final i = list.indexWhere((t) => t.id == tt.id);
+              if (i >= 0) {
+                list[i] = tt;
+              } else {
+                list.add(tt);
+              }
+              _allTimetables = list;
             });
-            // 导入的是新学期的课表 → 跳到它自己的当前周
+            await _rememberCurrentTimetable(tt.id);
+            // 跳到新课表自己的当前周
             _goToWeek(tt.currentWeek(), animate: false);
             _syncPageToWeek(tt);
+            unawaited(_restoreReminders(tt));
+            if (!mounted) return;
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('已导入 ${tt.courses.length} 门课程')),
+              SnackBar(content: Text('已导入「${tt.name}」共 ${tt.courses.length} 门课程')),
             );
           },
         ),
@@ -500,6 +711,8 @@ class _HomeShellState extends State<HomeShell> {
                                   _slotPrefs.indexOf(weekday, start, end),
                               onSelectConflict: _showConflictPicker,
                               onTapCourse: (course, slot) => _showCourseDetail(course, slot),
+                              onTapEmpty: _addEntryAt,
+                              onTapEvent: _openEvent,
                             );
                           },
                         ),
@@ -514,6 +727,7 @@ class _HomeShellState extends State<HomeShell> {
                     onEditSemesterStart: _editSemesterStart,
                     onOpenAppearance: _openAppearance,
                     onOpenAbout: _openAbout,
+                    onManageTimetables: _openTimetableManager,
                   ),
           ),
         ],

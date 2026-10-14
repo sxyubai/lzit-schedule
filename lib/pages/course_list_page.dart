@@ -26,6 +26,9 @@ class CourseListPage extends StatelessWidget {
   /// 打开「关于」页（作者 / 交流群 / GitHub）
   final VoidCallback? onOpenAbout;
 
+  /// 打开课表管理（切换 / 重命名 / 删除多套课表）
+  final VoidCallback? onManageTimetables;
+
   const CourseListPage({
     super.key,
     required this.timetable,
@@ -35,6 +38,7 @@ class CourseListPage extends StatelessWidget {
     this.onEditSemesterStart,
     this.onOpenAppearance,
     this.onOpenAbout,
+    this.onManageTimetables,
   });
 
   static const _wd = ['', '一', '二', '三', '四', '五', '六', '日'];
@@ -132,6 +136,43 @@ class CourseListPage extends StatelessWidget {
                 ),
             ],
           ),
+          // 课表管理：多套课表（大一/大二/当前学期）的切换、重命名、删除
+          if (onManageTimetables != null) ...[
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: onManageTimetables,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.library_books_outlined, size: 17, color: Colors.grey[700]),
+                    const SizedBox(width: 8),
+                    Text('课表管理',
+                        style: TextStyle(fontSize: 12.5, color: Colors.grey[800])),
+                    const Spacer(),
+                    Text(timetable.name,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.primary,
+                        )),
+                    const SizedBox(width: 4),
+                    Icon(Icons.chevron_right, size: 16, color: Colors.grey[600]),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 2),
+              child: Text('可重命名、切换、删除；导入时也能选覆盖或新增',
+                  style: TextStyle(fontSize: 10.5, color: Colors.grey[600])),
+            ),
+          ],
           // 学期第一天：决定所有日期与"当前第几周"，必须可调
           if (onEditSemesterStart != null) ...[
             const SizedBox(height: 8),

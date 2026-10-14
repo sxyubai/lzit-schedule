@@ -12,12 +12,10 @@ const String kAuthorName = '生鲜鱼白';
 const String kGroupNumber = '1126356335';
 
 /// GitHub 仓库地址
-///
-/// ⚠️ 仓库建好后，把 `YOUR_NAME` 换成你的 GitHub 用户名即可（只改这一处）。
-const String kGithubUrl = 'https://github.com/YOUR_NAME/lzit-schedule';
+const String kGithubUrl = 'https://github.com/sxyubai/lzit-schedule';
 
 /// 应用版本（与 pubspec 的 version 保持一致，改版本时一起改）
-const String kAppVersion = '1.13.0';
+const String kAppVersion = '1.14.0';
 
 /// 项目简介
 const String kIntro =

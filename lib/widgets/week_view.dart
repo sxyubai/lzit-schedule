@@ -68,6 +68,12 @@ class WeekView extends StatelessWidget {
   /// 课程卡片不透明度（外观设置可调；1.0 = 完全不透明）
   final double cardOpacity;
 
+  /// 点击空白格（星期, 节次）—— 用来手动添加课程或事件
+  final void Function(int weekday, int section)? onTapEmpty;
+
+  /// 点击一次性事件卡片
+  final void Function(TimetableEvent event)? onTapEvent;
+
   /// 取"该时段当前显示第几门课"（由外部持久化的冲突偏好提供）
   final int Function(int weekday, int startSection, int endSection)? indexOfSlot;
 
@@ -83,6 +89,8 @@ class WeekView extends StatelessWidget {
     this.radius = kSectionRadiusDefault,
     this.showWeekend = true,
     this.cardOpacity = 0.90,
+    this.onTapEmpty,
+    this.onTapEvent,
     this.onTapCourse,
     this.indexOfSlot,
     this.onSelectConflict,
@@ -248,8 +256,13 @@ class WeekView extends StatelessWidget {
                                     ),
                                   // 背景网格线
                                   ..._gridLines(context, days, sections, colW),
+                                  // 空白格点击层：放在课程卡片**下面**，
+                                  // 这样点已有卡片时不会误触发"添加"
+                                  ..._emptyCells(days, sections, colW),
                                   // 课程卡片
                                   ..._courseCards(context, days, sections, colW),
+                                  // 一次性事件（画在课程之上，方便看到）
+                                  ..._eventCards(days, sections, colW),
                                 ],
                               );
                             },
@@ -267,6 +280,91 @@ class WeekView extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// 空白格的透明点击层：点一下就能添加课程 / 事件
+  List<Widget> _emptyCells(int days, int sections, double colW) {
+    if (onTapEmpty == null) return const [];
+    final out = <Widget>[];
+    for (var d = 1; d <= days; d++) {
+      for (var s = 1; s <= sections; s++) {
+        out.add(Positioned(
+          left: (d - 1) * colW,
+          top: (s - 1) * sectionHeight,
+          width: colW,
+          height: sectionHeight,
+          child: GestureDetector(
+            key: ValueKey('empty_${d}_$s'),
+            behavior: HitTestBehavior.opaque,
+            onTap: () => onTapEmpty!(d, s),
+          ),
+        ));
+      }
+    }
+    return out;
+  }
+
+  /// 一次性事件卡片
+  ///
+  /// 事件绑定的是**具体日期**，所以先换算成「第几周 + 星期几」，
+  /// 只画在当前正在看的那一周里。
+  /// 样式上与课程区分：紫色底 + 图钉图标。
+  List<Widget> _eventCards(int days, int sections, double colW) {
+    final out = <Widget>[];
+    for (final ev in timetable.events) {
+      if (timetable.weekOf(ev.date) != week) continue;
+      final wd = ev.date.weekday;
+      if (wd < 1 || wd > days) continue;
+      final start = ev.startSection.clamp(1, sections);
+      final end = ev.endSection.clamp(start, sections);
+      final top = (start - 1) * sectionHeight;
+      final height = (end - start + 1) * sectionHeight - 2;
+
+      out.add(Positioned(
+        left: (wd - 1) * colW + 2,
+        top: top + 1,
+        width: colW - 4,
+        height: height,
+        child: GestureDetector(
+          key: ValueKey('event_${ev.id}'),
+          onTap: onTapEvent == null ? null : () => onTapEvent!(ev),
+          child: Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF8E5BD9).withValues(alpha: cardOpacity),
+              borderRadius: BorderRadius.circular(radius),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.55)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.push_pin, size: 9, color: Colors.white),
+                    const SizedBox(width: 2),
+                    Expanded(
+                      child: Text(ev.title,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w600),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+                if (ev.location.isNotEmpty)
+                  Text(ev.location,
+                      style: const TextStyle(color: Colors.white70, fontSize: 8.5),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+        ),
+      ));
+    }
+    return out;
   }
 
   List<Widget> _gridLines(BuildContext context, int days, int sections, double colW) {

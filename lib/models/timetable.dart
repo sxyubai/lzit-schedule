@@ -265,6 +265,9 @@ class Timetable {
   /// 校历节假日/调休（日期 -> 是否为上课日）
   final Map<String, bool> holidays;
 
+  /// 手动添加的一次性事件（只在某一天，不按周次重复）
+  final List<TimetableEvent> events;
+
   const Timetable({
     required this.id,
     required this.name,
@@ -280,6 +283,7 @@ class Timetable {
     this.student = const StudentInfo(),
     this.unscheduled = const [],
     this.holidays = const {},
+    this.events = const [],
   });
 
   /// 计算某日期属于第几周（可能为 0 或负，表示学期外）
@@ -321,6 +325,7 @@ class Timetable {
     StudentInfo? student,
     List<UnscheduledCourse>? unscheduled,
     Map<String, bool>? holidays,
+    List<TimetableEvent>? events,
   }) =>
       Timetable(
         id: id ?? this.id,
@@ -337,6 +342,7 @@ class Timetable {
         student: student ?? this.student,
         unscheduled: unscheduled ?? this.unscheduled,
         holidays: holidays ?? this.holidays,
+        events: events ?? this.events,
       );
 
   Map<String, dynamic> toJson() => {
@@ -354,6 +360,7 @@ class Timetable {
         'student': student.toJson(),
         'unscheduled': unscheduled.map((u) => u.toJson()).toList(),
         'holidays': holidays,
+        'events': events.map((e) => e.toJson()).toList(),
       };
 
   factory Timetable.fromJson(Map<String, dynamic> j) => Timetable(
@@ -380,5 +387,77 @@ class Timetable {
             .toList(),
         holidays: ((j['holidays'] as Map?) ?? const {})
             .map((k, v) => MapEntry(k as String, v as bool)),
+        events: ((j['events'] as List?) ?? const [])
+            .map((e) => TimetableEvent.fromJson((e as Map).cast<String, dynamic>()))
+            .toList(),
+      );
+}
+
+
+/// 推断默认的「学期第一天」（第 1 周周一）
+///
+/// 为什么需要默认值：教务系统的课表接口**只给周次、不给日期**，
+/// 所有日期都靠这个基准往后推。所以给一个合理猜测让用户微调，
+/// 比让他从零选好得多。
+///
+/// 规则：8 月及以后 → 当年 9 月 1 日；否则 → 当年 3 月 1 日
+/// （对应国内高校普遍的秋季/春季学期）。
+DateTime defaultSemesterStart([DateTime? now]) {
+  final d = now ?? DateTime.now();
+  return d.month >= 8 ? DateTime(d.year, 9, 1) : DateTime(d.year, 3, 1);
+}
+
+/// 生成默认课表名，如 `2026课表`
+String defaultTimetableName(DateTime startDate) => '${startDate.year}课表';
+
+
+/// 一次性事件（只在某一天发生，不按周次重复）
+///
+/// 与 [Course] 的区别：
+///   · Course 按「周次 + 星期几」重复出现（每周同一时间）
+///   · TimetableEvent 绑定在**具体日期**上，如「10 月 20 日 下午开会」
+///
+/// 为了让事件也能画进课表网格，这里用节次（而不是具体时刻）表示时段。
+class TimetableEvent {
+  final String id;
+  final String title;
+
+  /// 具体日期（只用到年月日）
+  final DateTime date;
+
+  /// 起始/结束节次（复用课表的节次网格摆放）
+  final int startSection;
+  final int endSection;
+
+  final String location;
+
+  const TimetableEvent({
+    required this.id,
+    required this.title,
+    required this.date,
+    required this.startSection,
+    required this.endSection,
+    this.location = '',
+  });
+
+  /// 只保留年月日的日期
+  DateTime get day => DateTime(date.year, date.month, date.day);
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'date': date.toIso8601String(),
+        'startSection': startSection,
+        'endSection': endSection,
+        'location': location,
+      };
+
+  factory TimetableEvent.fromJson(Map<String, dynamic> j) => TimetableEvent(
+        id: (j['id'] ?? '').toString(),
+        title: (j['title'] ?? '').toString(),
+        date: DateTime.tryParse((j['date'] ?? '').toString()) ?? DateTime.now(),
+        startSection: ((j['startSection'] as num?)?.toInt() ?? 1).clamp(1, 20),
+        endSection: ((j['endSection'] as num?)?.toInt() ?? 1).clamp(1, 20),
+        location: (j['location'] ?? '').toString(),
       );
 }

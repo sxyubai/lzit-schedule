@@ -182,7 +182,19 @@ window.__lzitFetchResult = null;
 class ImportPage extends StatefulWidget {
   final void Function(Timetable) onImported;
 
-  const ImportPage({super.key, required this.onImported});
+  /// 当前已存在的课表 id（null = 还没有课表）。
+  /// 用来在导入时问用户「覆盖它」还是「另外新增一份」。
+  final String? existingId;
+
+  /// 当前课表名（显示在「覆盖」选项里，让用户知道要覆盖谁）
+  final String? existingName;
+
+  const ImportPage({
+    super.key,
+    required this.onImported,
+    this.existingId,
+    this.existingName,
+  });
 
   @override
   State<ImportPage> createState() => _ImportPageState();
@@ -439,9 +451,9 @@ class _ImportPageState extends State<ImportPage> {
                       child: FilledButton(
                         onPressed: () {
                           Navigator.pop(ctx);
-                          widget.onImported(_buildTimetable(courses, parsed));
+                          _openImportOptions(courses, parsed);
                         },
-                        child: const Text('确认导入'),
+                        child: const Text('下一步'),
                       ),
                     ),
                   ],
@@ -454,19 +466,137 @@ class _ImportPageState extends State<ImportPage> {
     );
   }
 
-  Timetable _buildTimetable(List<Course> courses, ZfTimetableResponse? parsed) {
+  /// 导入设置对话框：课表名 / 学期第一天 / 覆盖或新增
+  ///
+  /// 为什么必须有这一步：
+  ///   · 课表接口**只给周次不给日期**，起始日猜错一周，整张表头的日期全错
+  ///   · 一个学期可能同时存好几套课表（大一/大二…），得让用户决定放哪
+  Future<void> _openImportOptions(List<Course> courses, ZfTimetableResponse? parsed) async {
+    final guessed = defaultSemesterStart();
+    final nameCtl = TextEditingController(text: defaultTimetableName(guessed));
+    var startDate = guessed;
+    var replace = widget.existingId != null;
+    var nameEdited = false;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: const Text('导入设置'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameCtl,
+                  onChanged: (_) => nameEdited = true,
+                  decoration: const InputDecoration(
+                    labelText: '课表名称',
+                    helperText: '例如「2026课表」「大四上」',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                InkWell(
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: startDate,
+                      firstDate: DateTime(startDate.year - 1, 1, 1),
+                      lastDate: DateTime(startDate.year + 2, 12, 31),
+                      helpText: '选择第 1 周的周一',
+                    );
+                    if (picked == null) return;
+                    // 统一落到那一周的周一，避免整张表日期偏移
+                    final mon = picked.subtract(Duration(days: picked.weekday - 1));
+                    setDlg(() {
+                      startDate = DateTime(mon.year, mon.month, mon.day);
+                      if (!nameEdited) {
+                        nameCtl.text = defaultTimetableName(startDate);
+                      }
+                    });
+                  },
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '学期第一天（第 1 周周一）',
+                      helperText: '课表只给周次，日期全靠这个基准推算',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    child: Row(
+                      children: [
+                        Text('${startDate.year}/${startDate.month}/${startDate.day}'),
+                        const Spacer(),
+                        const Icon(Icons.edit_calendar_outlined, size: 18),
+                      ],
+                    ),
+                  ),
+                ),
+                if (widget.existingId != null) ...[
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: replace,
+                    onChanged: (v) => setDlg(() => replace = v),
+                    title: const Text('覆盖现有课表', style: TextStyle(fontSize: 14)),
+                    subtitle: Text(
+                      replace
+                          ? '将替换「${widget.existingName ?? widget.existingId}」'
+                          : '保留它，另外新增一份',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('导入'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (ok != true || !mounted) return;
+    nameCtl.dispose();
+
+    final name = nameCtl.text.trim().isEmpty
+        ? defaultTimetableName(startDate)
+        : nameCtl.text.trim();
+    widget.onImported(_buildTimetable(
+      courses,
+      parsed,
+      name: name,
+      startDate: startDate,
+      // 覆盖 → 沿用旧 id（替换它）；新增 → 给一个唯一 id（否则会撞车）
+      id: replace ? widget.existingId : 'jwglxt-${DateTime.now().millisecondsSinceEpoch}',
+    ));
+  }
+
+  Timetable _buildTimetable(
+    List<Course> courses,
+    ZfTimetableResponse? parsed, {
+    required String name,
+    required DateTime startDate,
+    String? id,
+  }) {
     final now = DateTime.now();
-    // 第 1 周周一：教务系统的学期起始日无法从课表接口直接拿到，
-    // 这里先按"今天所在周的周一"占位，导入后用户可在设置里校正开学日期。
-    final monday = now.subtract(Duration(days: now.weekday - 1));
-    final startDate = DateTime(monday.year, monday.month, monday.day);
     final semester = (parsed?.semesterName.isNotEmpty ?? false)
         ? parsed!.semesterName
         : '${now.year}';
 
     return Timetable(
-      id: 'jwglxt-${parsed?.xnm ?? now.year}-${parsed?.xqm ?? ''}',
-      name: '教务导入 $semester',
+      id: id ?? 'jwglxt-${parsed?.xnm ?? now.year}-${parsed?.xqm ?? ''}',
+      name: name,
       semesterName: semester,
       xnm: parsed?.xnm ?? '',
       xqm: parsed?.xqm ?? '',
