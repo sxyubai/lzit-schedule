@@ -34,7 +34,15 @@
 
 ## 截图
 
-> 待补充。
+> 截图里是**假数据**——课程、教室、教师名全是编的，不含任何真实信息。
+
+| 课表（日期表头 · 今天高亮 · 事件卡片） | 点课程卡片：详情与删除 |
+| :---: | :---: |
+| ![课表](docs/screenshots/01-timetable.png) | ![课程详情与删除](docs/screenshots/02-course-detail.png) |
+
+| 点空白格：加课程或事件 | 无固定时段的实践课 / 实习 |
+| :---: | :---: |
+| ![添加课程或事件](docs/screenshots/03-add-entry.png) | ![无固定时段课程](docs/screenshots/04-unscheduled.png) |
 
 ## 构建
 
