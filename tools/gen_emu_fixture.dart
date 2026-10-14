@@ -50,7 +50,18 @@ void main() {
       c('c4', '已经结课的课', 4, 7, 8, {for (var w = 1; w <= 6; w++) w}, '3教101', '赵老师'),
     ],
     unscheduled: const [
-      UnscheduledCourse(name: '毕业实习', teacher: '孙老师', weeks: '1-20周', kindMark: '●'),
+      UnscheduledCourse(
+          name: '毕业实习', teacher: '谭超,唐爱龙', weeks: '11-14周',
+          credits: '4', kindMark: '实践'),
+      UnscheduledCourse(
+          name: '操作系统', teacher: '卢光云', weeks: '6-13周',
+          credits: '3.0', kindMark: '理论', retake: true),
+      UnscheduledCourse(
+          name: '操作系统', teacher: '卢光云', weeks: '14-17周',
+          credits: '3', kindMark: '上机', retake: true),
+      UnscheduledCourse(
+          name: '演讲的艺术（智慧树网络教学）', teacher: '李颖,杨文涛', weeks: '1-16周',
+          credits: '2.0', kindMark: '理论'),
     ],
     events: [
       TimetableEvent(

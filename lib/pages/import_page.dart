@@ -604,13 +604,17 @@ class _ImportPageState extends State<ImportPage> {
       totalWeeks: 20,
       sectionsPerDay: 10,
       courses: courses,
-      // 实践课/实习/网课：没有固定节次，但必须带过去，否则界面上看不到
-      unscheduled: (parsed?.unscheduled ?? const [])
+      // 实践课/实习/网课：没有固定节次，但必须带过去，否则界面上看不到。
+      // kindMark（实践/理论/上机…）与 retake（重修）同样不能丢，
+      // 它们来自 sjkList 的 sjkcgs / cxbj，parser 已经解出来了。
+      unscheduled: (parsed?.unscheduled ?? const <ZfUnscheduled>[])
           .map((u) => UnscheduledCourse(
                 name: u.name,
                 weeks: u.weeks,
                 teacher: u.teacher,
                 credits: u.credits,
+                kindMark: u.kindMark,
+                retake: u.retake,
               ))
           .toList(),
       student: StudentInfo(

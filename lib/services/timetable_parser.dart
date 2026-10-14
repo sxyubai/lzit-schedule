@@ -297,6 +297,22 @@ String _kindBySymbol(String symbol) {
   }
 }
 
+/// sjkList 里的一条「无固定时段课程」（实践/实习/网课）
+///
+/// 这类课只有周次范围（`qsjsz`），没有星期和节次，塞不进周视图网格。
+/// 两个附加信息都不能丢：
+///   · 类型标记 —— 藏在 `sjkcgs` 里，形如 "毕业实习●谭超.../11-14周"，
+///     末尾那个 ●○▲■★ 才是课程性质（kcmc 本身不带符号）
+///   · 是否重修 —— `cxbj == '1'` 或 `cxbjmc` 非空
+typedef ZfUnscheduled = ({
+  String name,
+  String weeks,
+  String teacher,
+  String credits,
+  String kindMark,
+  bool retake,
+});
+
 /// 正方「学生课表查询」接口完整响应
 class ZfTimetableResponse {
   final List<Course> courses;
@@ -314,7 +330,7 @@ class ZfTimetableResponse {
   final String xnmc; // 2026-2027
 
   /// 实践课程 / 其它课程（无固定时段的课，来自 sjkList）
-  final List<({String name, String weeks, String teacher, String credits})> unscheduled;
+  final List<ZfUnscheduled> unscheduled;
 
   const ZfTimetableResponse({
     required this.courses,
@@ -370,17 +386,44 @@ ZfTimetableResponse parseZfResponse(Map<String, dynamic> json) {
   final kbList = (json['kbList'] as List?) ?? const [];
   final courses = parseWebRecords(kbList);
 
-  final unscheduled = <({String name, String weeks, String teacher, String credits})>[];
+  final unscheduled = <ZfUnscheduled>[];
   for (final raw in (json['sjkList'] as List?) ?? const []) {
     if (raw is! Map) continue;
     final m = raw.cast<String, dynamic>();
-    final name = (m['kcmc'] ?? '').toString();
+    var name = (m['kcmc'] ?? '').toString().trim();
     if (name.isEmpty) continue;
+
+    // 类型标记：kcmc 通常不带符号，要从 sjkcgs 里认
+    // （sjkcgs 形如 "操作系统○卢光云(共8周)/6-13周"）。
+    // 兼容 kcmc 自带符号的写法（"毕业实习●"），优先级更高。
+    var kind = '';
+    for (final e in _kindMarks.entries) {
+      if (name.endsWith(e.key)) {
+        kind = e.value;
+        name = name.substring(0, name.length - e.key.length).trim();
+        break;
+      }
+    }
+    if (kind.isEmpty) {
+      final group = (m['sjkcgs'] ?? '').toString();
+      for (final e in _kindMarks.entries) {
+        if (group.contains(e.key)) {
+          kind = e.value;
+          break;
+        }
+      }
+    }
+
+    final cxbj = (m['cxbj'] ?? '').toString();
+    final cxbjmc = (m['cxbjmc'] ?? '').toString();
+
     unscheduled.add((
       name: name,
-      weeks: (m['qsjsz'] ?? '').toString(),
-      teacher: (m['jsxm'] ?? '').toString(),
-      credits: (m['xf'] ?? '').toString(),
+      weeks: (m['qsjsz'] ?? '').toString().trim(),
+      teacher: (m['jsxm'] ?? '').toString().trim(),
+      credits: (m['xf'] ?? '').toString().trim(),
+      kindMark: kind,
+      retake: cxbj == '1' || cxbjmc.isNotEmpty,
     ));
   }
 

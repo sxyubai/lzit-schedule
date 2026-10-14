@@ -153,6 +153,19 @@ dart analyze lib test # 静态检查（必须 No issues found）
 
 样本通过 `test/test_data.dart` 从 `tools/samples/` 读（验证真实 JSON 格式）。
 
+样本是**从真实接口响应转换**出来的，不要手写：
+
+```powershell
+dart run tools/gen_sample_timetable.dart   # sample_kb_api.json -> timetable_2026_2027_1.json
+dart run tools/gen_emu_fixture.dart        # 生成假课表，给模拟器验证界面用
+```
+
+> ⚠️ **别用同名文件覆盖 `tools/samples/` 里的样本**（2026-10-14 踩过）：
+> 整理文件时把 `tools/` 根目录的同名旧副本 `Move-Item -Force` 盖了过去，
+> 那份是**没有 unscheduled 的旧版本**，直接让 3 个测试挂掉，且无法从 git 恢复
+> （samples/ 本来就被忽略）。所幸同目录的 `sample_kb_api.json` 是完整原始响应，
+> 用上面的脚本重新生成了。**移动/覆盖样本前先比较内容，或用新的文件名。**
+
 ### 抓取脚本的离线测试（不用真机/模拟器）
 
 WebView 注入的抓取脚本是纯 JS，可以脱离安卓验证：
@@ -244,6 +257,21 @@ node test_fetch_script.js   # 16 项断言
 > ⚠️ **纯文本复制会丢失星期列**：课表页的"星期"由表格**列位置**表达，
 > Ctrl+A 复制的文本里 7 个格子被压成一维，无法还原星期几。
 > 必须走接口（`xqj`）或从 DOM 按列位置提取。
+
+#### ⚠️ `sjkList`（无固定时段课程）的两个隐藏字段
+
+这类课**没有** `xqj`/`jcs`/`zcd`，只有 `qsjsz` 周次范围。容易漏掉的是：
+
+| 想要的 | 在哪 | 例子 |
+| --- | --- | --- |
+| **课程性质**（实践/理论/上机…） | ❌ 不在 `kcmc` 里，藏在 **`sjkcgs`** | `kcmc='操作系统'`，但 `sjkcgs='操作系统○卢光云(共8周)/6-13周'` |
+| **是否重修** | `cxbj == '1'` 或 `cxbjmc` 非空 | `cxbj='1'` / `cxbjmc='重修'` |
+| 教师 | `jsxm`（**不是 `xm`**） | `卢光云` |
+| 周次 | `qsjsz` | `11-14周`、`第17周` |
+
+符号表：`●`实践 `★`实验上机 `■`实验 `▲`上机 `○`理论。
+**2026-10-14 修过一次**：parser 当初只取了 name/weeks/teacher/credits，
+导致 App 里导入后，实践课面板上「实践/理论/上机」与「重修」标记**全都不显示**。
 
 ### 其它菜单功能码（实测抓取）
 

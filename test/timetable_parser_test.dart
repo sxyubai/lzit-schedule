@@ -106,6 +106,31 @@ void main() {
       expect(names.contains('离散数学'), isTrue);
     });
 
+    test('sjkList 的类型标记与重修标记不能丢', () {
+      // 这两个信息都不在 kcmc 里：类型符号藏在 sjkcgs（"操作系统○卢光云(共8周)/6-13周"），
+      // 重修看 cxbj/cxbjmc。曾经漏解过 → 导入后实践课面板上没有任何标记。
+      expect(resp.unscheduled.length, 9);
+
+      final byKey = {
+        for (final u in resp.unscheduled) '${u.name}|${u.kindMark}': u,
+      };
+      expect(byKey.containsKey('毕业实习|实践'), isTrue, reason: 'sjkcgs 里的 ●');
+      expect(byKey.containsKey('软件开发综合实训|实践'), isTrue);
+      expect(byKey.containsKey('操作系统|理论'), isTrue, reason: 'sjkcgs 里的 ○');
+      expect(byKey.containsKey('操作系统|上机'), isTrue, reason: 'sjkcgs 里的 ▲');
+      expect(byKey.containsKey('计算机网络|上机'), isTrue);
+
+      // 重修：cxbj=1 / cxbjmc='重修'
+      expect(byKey['操作系统|理论']!.retake, isTrue);
+      expect(byKey['离散数学|理论']!.retake, isTrue);
+      expect(byKey['计算机网络|上机']!.retake, isTrue);
+      expect(byKey['毕业实习|实践']!.retake, isFalse, reason: '实习不是重修');
+
+      // 周次范围照实带过来
+      expect(byKey['毕业实习|实践']!.weeks, '11-14周');
+      expect(byKey['认识实习|实践']!.weeks, '第17周');
+    });
+
     test('教室与教师', () {
       final py = resp.courses.firstWhere((c) => c.name == 'Python程序设计B');
       final rooms = py.slots.map((s) => s.room).toSet();
